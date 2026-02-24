@@ -150,7 +150,7 @@ def translate_batch(sentences):
         prompt += "\n".join(sentences)
 
         response = client.models.generate_content(
-            model="gemini-2.5-pro",
+            model="gemini-1.5-flash",
             contents=prompt,
         )
 
@@ -240,4 +240,5 @@ app.add_handler(
 )
 
 print("🤖 Bot Running...")
+
 app.run_polling()
