@@ -150,7 +150,7 @@ def translate_batch(sentences):
         prompt += "\n".join(sentences)
 
         response = client.models.generate_content(
-            model="models/gemini-1.5-flash",
+            model="gemini-2.5-pro",
             contents=prompt,
         )
 
@@ -166,64 +166,66 @@ def translate_batch(sentences):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     processing_msg = await update.message.reply_text("⏳ Processing image...")
 
+    file_path = "input.jpg"
+
+    if update.message.photo:
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        await file.download_to_drive(file_path)
+
+    elif update.message.document:
+        doc = update.message.document
+        if not doc.mime_type.startswith("image/"):
+            await update.message.reply_text("❌ Please send an image file.")
+            return
+        file = await doc.get_file()
+        await file.download_to_drive(file_path)
+    else:
+        await update.message.reply_text("❌ Please send an image.")
+        return
+
+    preprocess_image(file_path)
+    chunks = split_image(file_path)
+
+    # 🔥 PARALLEL OCR
+    async def ocr_chunk(chunk):
+        return await asyncio.to_thread(google_ocr, chunk)
+
+    tasks = [ocr_chunk(chunk) for chunk in chunks]
+    results = await asyncio.gather(*tasks)
+
+    sentences = []
+    for block_list in results:
+        sentences.extend(block_list)
+
+    if not sentences:
+        await processing_msg.edit_text("❌ No text detected.")
+        return
+
+    translated_sentences = await asyncio.to_thread(
+        translate_batch,
+        sentences
+    )
+
+    if not translated_sentences or len(translated_sentences) != len(sentences):
+        await processing_msg.edit_text("❌ Translation mismatch.")
+        return
+
+    reply = ""
+    for en, mm in zip(sentences, translated_sentences):
+        reply += f"“{en}”\n→ “{mm}”\n\n"
+
+    await processing_msg.edit_text(reply[:4000])
+
+    # 🔥 CLEANUP FILES
     try:
-        file_path = "input.jpg"
+        os.remove(file_path)
+    except:
+        pass
 
-        if update.message.photo:
-            photo = update.message.photo[-1]
-            file = await photo.get_file()
-            await file.download_to_drive(file_path)
-
-        elif update.message.document:
-            doc = update.message.document
-            if not doc.mime_type.startswith("image/"):
-                await processing_msg.edit_text("❌ Please send an image file.")
-                return
-            file = await doc.get_file()
-            await file.download_to_drive(file_path)
-        else:
-            await processing_msg.edit_text("❌ Please send an image.")
-            return
-
-        preprocess_image(file_path)
-        chunks = split_image(file_path)
-
-        async def ocr_chunk(chunk):
-            return await asyncio.to_thread(google_ocr, chunk)
-
-        results = await asyncio.gather(*[ocr_chunk(c) for c in chunks])
-
-        sentences = []
-        for r in results:
-            sentences.extend(r)
-
-        if not sentences:
-            await processing_msg.edit_text("❌ No text detected.")
-            return
-
-        translated_sentences = await asyncio.to_thread(
-            translate_batch,
-            sentences
-        )
-
-        if not translated_sentences:
-            await processing_msg.edit_text("⚠️ Translation failed. Try again.")
-            return
-
-        reply = ""
-        for en, mm in zip(sentences, translated_sentences):
-            reply += f"“{en}”\n→ “{mm}”\n\n"
-
-        await processing_msg.edit_text(reply[:4000])
-
-    except Exception as e:
-        print("MAIN ERROR:", e)
-        await processing_msg.edit_text("⚠️ Server busy. Please try again.")
-
-    finally:
-        # Always cleanup
+    for chunk in chunks:
         try:
-            os.remove("input.jpg")
+            os.remove(chunk)
         except:
             pass
 
@@ -238,9 +240,4 @@ app.add_handler(
 )
 
 print("🤖 Bot Running...")
-
 app.run_polling()
-
-
-
-
