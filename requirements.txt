@@ -1,4 +1,4 @@
 python-telegram-bot==20.3
 requests
 Pillow
-google-genai
+google-genai>=0.3.0
