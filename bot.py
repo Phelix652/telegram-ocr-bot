@@ -138,29 +138,29 @@ def google_ocr(image_path):
 
 def translate_batch(sentences):
     try:
-        # Merge everything into ONE clean block
-        full_text = "\n".join(sentences)
-
         prompt = (
             "You are a professional comic translator.\n"
-            "Translate the following English text into Myanmar.\n"
-            "Keep original meaning and tone.\n"
-            "Do NOT summarize.\n"
-            "Do NOT remove content.\n\n"
-            "TEXT:\n"
-            f"{full_text}"
+            "Translate each English line into Myanmar.\n"
+            "Keep same number of lines.\n"
+            "Do NOT add numbering.\n"
+            "Do NOT explain.\n"
+            "Return ONLY translated lines.\n\n"
         )
+
+        prompt += "\n".join(sentences)
 
         response = client.models.generate_content(
             model="gemini-2.5-pro",
             contents=prompt,
         )
 
-        return response.text.strip()
+        output_lines = response.text.strip().split("\n")
+
+        return output_lines
 
     except Exception as e:
         print("GEMINI ERROR:", e)
-        return None
+        return []
 
 # 🔥 Telegram Handler (OPTIMIZED)
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -188,11 +188,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chunks = split_image(file_path)
 
     # 🔥 PARALLEL OCR
-    # 🔥 SAFE OCR (NO PARALLEL - PREVENTS OUT OF MEMORY)
-    results = []
-    for chunk in chunks:
-        result = await asyncio.to_thread(google_ocr, chunk)
-        results.append(result)
+    async def ocr_chunk(chunk):
+        return await asyncio.to_thread(google_ocr, chunk)
+
+    tasks = [ocr_chunk(chunk) for chunk in chunks]
+    results = await asyncio.gather(*tasks)
 
     sentences = []
     for block_list in results:
