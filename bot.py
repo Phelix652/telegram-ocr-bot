@@ -141,20 +141,19 @@ def translate_batch(sentences):
         prompt = (
             "You are a professional comic translator.\n"
             "Translate each English line into Myanmar.\n"
-            "Keep same number of lines.\n"
-            "Do NOT add numbering.\n"
-            "Do NOT explain.\n"
-            "Return ONLY translated lines.\n\n"
+            "Keep exact same order.\n"
+            "Return results separated ONLY by '|||'\n"
+            "Do NOT add anything else.\n\n"
         )
 
-        prompt += "\n".join(sentences)
+        prompt += "|||".join(sentences)
 
         response = client.models.generate_content(
             model="gemini-2.5-pro",
             contents=prompt,
         )
 
-        output_lines = response.text.strip().split("\n")
+        output_lines = response.text.strip().split("|||")
 
         return output_lines
 
