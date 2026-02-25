@@ -129,15 +129,35 @@ def translate_batch(sentences):
             "Do not explain.\n\n"
         )
 
-        prompt += "INPUT:\n"
         prompt += json.dumps(sentences, ensure_ascii=False)
 
         response = client.models.generate_content(
             model="gemini-2.5-pro",
             contents=prompt,
+            config={"response_mime_type": "application/json"}
         )
 
-        translated = json.loads(response.text)
+        # 🔥 Safe extraction
+        if hasattr(response, "text") and response.text:
+            raw_text = response.text.strip()
+        else:
+            try:
+                raw_text = response.candidates[0].content.parts[0].text.strip()
+            except Exception as e:
+                print("FAILED TO EXTRACT RESPONSE:", e)
+                return []
+
+        print("RAW GEMINI:", raw_text)
+
+        # 🔥 Remove markdown safely
+        if raw_text.startswith("```"):
+            raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+
+        try:
+            translated = json.loads(raw_text)
+        except Exception as e:
+            print("JSON PARSE ERROR:", e)
+            return []
 
         return translated
 
