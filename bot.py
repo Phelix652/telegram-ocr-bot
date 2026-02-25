@@ -88,7 +88,7 @@ def google_ocr(image_path):
                 "image": {"content": content},
                 "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
                 "imageContext": {
-                    "languageHints": ["en"]
+                    "languageHints": ["en", "my"]
                 }
             }
         ]
@@ -105,58 +105,41 @@ def google_ocr(image_path):
         print("VISION ERROR:", result["error"])
         return []
 
-    blocks_data = []
-
     try:
-        pages = result["responses"][0]["fullTextAnnotation"]["pages"]
+        full_text = result["responses"][0]["fullTextAnnotation"]["text"]
 
-        for page in pages:
-            for block in page["blocks"]:
+        # Split into lines
+        lines = [line.strip() for line in full_text.split("\n") if line.strip()]
 
-                # Get block position
-                vertices = block["boundingBox"]["vertices"]
-                x = vertices[0].get("x", 0)
-                y = vertices[0].get("y", 0)
-
-                block_text = ""
-                for paragraph in block["paragraphs"]:
-                    for word in paragraph["words"]:
-                        word_text = "".join([s["text"] for s in word["symbols"]])
-                        block_text += word_text + " "
-
-                cleaned = block_text.strip()
-                if cleaned:
-                    blocks_data.append((y, x, cleaned))
-
-        # Sort: Top → Bottom, then Left → Right
-        blocks_data.sort(key=lambda b: (b[0], b[1]))
-
-        return [b[2] for b in blocks_data]
+        return lines
 
     except:
         return []
 
 def translate_batch(sentences):
     try:
+        import json
+
         prompt = (
             "You are a professional comic translator.\n"
-            "Translate each English line into Myanmar.\n"
-            "Keep same number of lines.\n"
-            "Do NOT add numbering.\n"
-            "Do NOT explain.\n"
-            "Return ONLY translated lines.\n\n"
+            "Translate each line into Myanmar.\n"
+            "Return STRICT JSON array.\n"
+            "Same number of items as input.\n"
+            "If unsure, return empty string for that index.\n"
+            "Do not explain.\n\n"
         )
 
-        prompt += "\n".join(sentences)
+        prompt += "INPUT:\n"
+        prompt += json.dumps(sentences, ensure_ascii=False)
 
         response = client.models.generate_content(
             model="gemini-2.5-pro",
             contents=prompt,
         )
 
-        output_lines = response.text.strip().split("\n")
+        translated = json.loads(response.text)
 
-        return output_lines
+        return translated
 
     except Exception as e:
         print("GEMINI ERROR:", e)
@@ -207,9 +190,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sentences
     )
 
-    if not translated_sentences or len(translated_sentences) != len(sentences):
-        await processing_msg.edit_text("❌ Translation mismatch.")
+    if not translated_sentences:
+        await processing_msg.edit_text("❌ Translation failed.")
         return
+
+    # Auto-fix length mismatch
+    if len(translated_sentences) < len(sentences):
+        translated_sentences += [""] * (len(sentences) - len(translated_sentences))
+
+    translated_sentences = translated_sentences[:len(sentences)]
 
     reply = ""
     for en, mm in zip(sentences, translated_sentences):
