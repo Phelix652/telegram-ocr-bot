@@ -88,7 +88,7 @@ def google_ocr(image_path):
                 "image": {"content": content},
                 "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
                 "imageContext": {
-                    "languageHints": ["en", "my"]
+                    "languageHints": ["en"]
                 }
             }
         ]
@@ -105,61 +105,58 @@ def google_ocr(image_path):
         print("VISION ERROR:", result["error"])
         return []
 
+    blocks_data = []
+
     try:
-        full_text = result["responses"][0]["fullTextAnnotation"]["text"]
+        pages = result["responses"][0]["fullTextAnnotation"]["pages"]
 
-        # Split into lines
-        lines = [line.strip() for line in full_text.split("\n") if line.strip()]
+        for page in pages:
+            for block in page["blocks"]:
 
-        return lines
+                # Get block position
+                vertices = block["boundingBox"]["vertices"]
+                x = vertices[0].get("x", 0)
+                y = vertices[0].get("y", 0)
+
+                block_text = ""
+                for paragraph in block["paragraphs"]:
+                    for word in paragraph["words"]:
+                        word_text = "".join([s["text"] for s in word["symbols"]])
+                        block_text += word_text + " "
+
+                cleaned = block_text.strip()
+                if cleaned:
+                    blocks_data.append((y, x, cleaned))
+
+        # Sort: Top → Bottom, then Left → Right
+        blocks_data.sort(key=lambda b: (b[0], b[1]))
+
+        return [b[2] for b in blocks_data]
 
     except:
         return []
 
 def translate_batch(sentences):
     try:
-        import json
-
         prompt = (
             "You are a professional comic translator.\n"
-            "Translate each line into Myanmar.\n"
-            "Return STRICT JSON array.\n"
-            "Same number of items as input.\n"
-            "If unsure, return empty string for that index.\n"
-            "Do not explain.\n\n"
+            "Translate each English line into Myanmar.\n"
+            "Keep same number of lines.\n"
+            "Do NOT add numbering.\n"
+            "Do NOT explain.\n"
+            "Return ONLY translated lines.\n\n"
         )
 
-        prompt += json.dumps(sentences, ensure_ascii=False)
+        prompt += "\n".join(sentences)
 
         response = client.models.generate_content(
             model="gemini-2.5-pro",
             contents=prompt,
-            config={"response_mime_type": "application/json"}
         )
 
-        # 🔥 Safe extraction
-        if hasattr(response, "text") and response.text:
-            raw_text = response.text.strip()
-        else:
-            try:
-                raw_text = response.candidates[0].content.parts[0].text.strip()
-            except Exception as e:
-                print("FAILED TO EXTRACT RESPONSE:", e)
-                return []
+        output_lines = response.text.strip().split("\n")
 
-        print("RAW GEMINI:", raw_text)
-
-        # 🔥 Remove markdown safely
-        if raw_text.startswith("```"):
-            raw_text = raw_text.replace("```json", "").replace("```", "").strip()
-
-        try:
-            translated = json.loads(raw_text)
-        except Exception as e:
-            print("JSON PARSE ERROR:", e)
-            return []
-
-        return translated
+        return output_lines
 
     except Exception as e:
         print("GEMINI ERROR:", e)
@@ -210,15 +207,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sentences
     )
 
-    if not translated_sentences:
-        await processing_msg.edit_text("❌ Translation failed.")
+    if not translated_sentences or len(translated_sentences) != len(sentences):
+        await processing_msg.edit_text("❌ Translation mismatch.")
         return
-
-    # Auto-fix length mismatch
-    if len(translated_sentences) < len(sentences):
-        translated_sentences += [""] * (len(sentences) - len(translated_sentences))
-
-    translated_sentences = translated_sentences[:len(sentences)]
 
     reply = ""
     for en, mm in zip(sentences, translated_sentences):
