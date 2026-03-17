@@ -139,22 +139,23 @@ def google_ocr(image_path):
 def translate_batch(sentences):
     try:
         prompt = (
-            "You are a professional comic translator.\n"
-            "Translate each English line into Myanmar.\n"
-            "Keep same number of lines.\n"
-            "Do NOT add numbering.\n"
-            "Do NOT explain.\n"
-            "Return ONLY translated lines.\n\n"
-        )
+    "You are a strict translator.\n"
+    "Translate each English sentence into Myanmar.\n"
+    "You MUST return EXACTLY the same number of sentences.\n"
+    "Each output must match one input.\n"
+    "DO NOT merge or skip sentences.\n"
+    "Return ONLY translations separated by '|||'\n"
+    "No explanation.\n\n"
+)
 
-        prompt += "\n".join(sentences)
+        prompt += "|||".join(sentences)
 
         response = client.models.generate_content(
             model="gemini-2.5-pro",
             contents=prompt,
         )
 
-        output_lines = response.text.strip().split("\n")
+        output_lines = response.text.strip().split("|||")
 
         return output_lines
 
@@ -207,9 +208,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sentences
     )
 
-    if not translated_sentences or len(translated_sentences) != len(sentences):
-        await processing_msg.edit_text("❌ Translation mismatch.")
+    if not translated_sentences:
+        await processing_msg.edit_text("❌ Translation failed.")
         return
+
+    # 🔥 Fix mismatch automatically
+    if len(translated_sentences) != len(sentences):
+        print("⚠️ Mismatch detected. Fixing...")
+
+        # Pad missing translations
+        while len(translated_sentences) < len(sentences):
+            translated_sentences.append("❌ Missing translation")
+
+        # Trim extra translations
+        translated_sentences = translated_sentences[:len(sentences)]
 
     reply = ""
     for en, mm in zip(sentences, translated_sentences):
