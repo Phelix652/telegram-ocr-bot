@@ -139,12 +139,14 @@ def google_ocr(image_path):
 def translate_batch(sentences):
     try:
         prompt = (
-            "You are a professional comic translator.\n"
-            "Translate each English line into Myanmar.\n"
-            "Keep exact same order.\n"
-            "Return results separated ONLY by '|||'\n"
-            "Do NOT add anything else.\n\n"
-        )
+    "You are a strict translator.\n"
+    "Translate each English sentence into Myanmar.\n"
+    "You MUST return EXACTLY the same number of sentences.\n"
+    "Each output must match one input.\n"
+    "DO NOT merge or skip sentences.\n"
+    "Return ONLY translations separated by '|||'\n"
+    "No explanation.\n\n"
+)
 
         prompt += "|||".join(sentences)
 
@@ -206,9 +208,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sentences
     )
 
-    if not translated_sentences or len(translated_sentences) != len(sentences):
-        await processing_msg.edit_text("❌ Translation mismatch.")
+    if not translated_sentences:
+        await processing_msg.edit_text("❌ Translation failed.")
         return
+
+    # 🔥 Fix mismatch automatically
+    if len(translated_sentences) != len(sentences):
+        print("⚠️ Mismatch detected. Fixing...")
+
+        # Pad missing translations
+        while len(translated_sentences) < len(sentences):
+            translated_sentences.append("❌ Missing translation")
+
+        # Trim extra translations
+        translated_sentences = translated_sentences[:len(sentences)]
 
     reply = ""
     for en, mm in zip(sentences, translated_sentences):
